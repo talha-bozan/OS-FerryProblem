@@ -32,6 +32,12 @@ typedef struct
     char *status;         // "waiting", "boarding", "on_ferry", "off_ferry"
 } Vehicle;
 
+// Node for queue
+typedef struct Node
+{
+    Vehicle *vehicle;
+    struct Node *next;
+} Node;
 // Struct for ferry
 typedef struct
 {
@@ -39,13 +45,21 @@ typedef struct
     int capacity; // 30 units
 } Ferry;
 
+// Queue data structure
+typedef struct Queue
+{
+    Node *front;
+    Node *rear;
+    int size;
+    int capacity;
+} Queue;
 // Struct for port
 typedef struct
 {
-    int id;               // 0 for Eskihisar, 1 for Topcular
-    int ferry_id;         // id of the ferry at the port
-    int current_line;     // 0 for Line1, 1 for Line2, 2 for Line3
-    int line_capacity[3]; // 20 units each
+    int id;                 // 0 for Eskihisar, 1 for Topcular
+    int ferry_id;           // id of the ferry at the port
+    int current_line;       // 0 for Line1, 1 for Line2, 2 for Line3
+    Queue waiting_queue[3]; // 3 waiting queues
 } Port;
 
 // Create and initialize for each vehicle type separately
@@ -83,6 +97,62 @@ sem_t sem_portTopcular_waiting_queue[3];
 // these are for deciding which booth will be used by the vehicle
 sem_t sem_boothEskihisar[4];
 sem_t sem_boothTopcular[4];
+
+// Initialize a queue
+void init_queue(Queue *q, int max_capacity)
+{
+    q->front = q->rear = NULL;
+    q->size = 0;
+    q->capacity = max_capacity;
+}
+
+// Add an element to the end of the queue
+void enqueue(Queue *q, Vehicle *v)
+{
+    Node *new_node = malloc(sizeof(Node));
+    new_node->vehicle = v;
+    new_node->next = NULL;
+
+    if (q->rear == NULL)
+    {
+        q->front = q->rear = new_node;
+    }
+    else
+    {
+        q->rear->next = new_node;
+        q->rear = new_node;
+    }
+
+    q->size++;
+}
+
+// Remove an element from the front of the queue
+Vehicle *dequeue(Queue *q)
+{
+    if (q->front == NULL)
+        return NULL; // Queue is empty
+
+    Node *temp = q->front;
+
+    Vehicle *v = temp->vehicle;
+    q->front = q->front->next;
+
+    if (q->front == NULL)
+    {
+        q->rear = NULL;
+    }
+
+    free(temp);
+    q->size--;
+
+    return v;
+}
+
+// Get the size of the queue
+int get_queue_size(Queue *q)
+{
+    return q->size;
+}
 
 void *vehicle_thread(void *arg)
 {
@@ -151,13 +221,13 @@ void *vehicle_thread(void *arg)
 
         sem_wait(&sem_queues[line_id]);
         // if waiting line is not full, then add vehicle to the current waiting line
-        if (port->line_capacity[line_id] >= vehicle->size)
+        if (get_queue_size(&port->waiting_queue[line_id]) + vehicle->size <= port->waiting_queue[line_id].capacity)
         {
-            port->line_capacity[line_id] -= vehicle->size;
-            vehicle->line_id = line_id;
+            enqueue(&port->waiting_queue[line_id], vehicle);
             vehicle->status = "waiting";
-            printf("%s%d starting at port %d has entered the waiting queue %d\n",
-                   vehicleType, vehicle->id, vehicle->start_port, line_id);
+            printf("%s%d starting at port %d has entered the waiting queue %d and the order is %d\n",
+                   vehicleType, vehicle->id, vehicle->start_port, line_id, get_queue_size(&port->waiting_queue[line_id]));
+
             sem_post(&sem_queues[line_id]);
             break;
         }
@@ -169,7 +239,13 @@ void *vehicle_thread(void *arg)
 }
 
 int main()
-{
+{ // Initialize the waiting queues
+    for (int i = 0; i < 3; i++)
+    {
+        init_queue(&portEskihisar.waiting_queue[i], 20);
+        init_queue(&portTopcular.waiting_queue[i], 20);
+    }
+
     for (int i = 0; i < 4; i++)
     {
         sem_init(&sem_boothEskihisar[i], 0, 1);
@@ -230,16 +306,10 @@ int main()
     portEskihisar.id = 0;
     portEskihisar.ferry_id = 0;
     portEskihisar.current_line = 0;
-    portEskihisar.line_capacity[0] = 20;
-    portEskihisar.line_capacity[1] = 20;
-    portEskihisar.line_capacity[2] = 20;
 
     portTopcular.id = 1;
     portTopcular.ferry_id = 1;
     portTopcular.current_line = 0;
-    portTopcular.line_capacity[0] = 20;
-    portTopcular.line_capacity[1] = 20;
-    portTopcular.line_capacity[2] = 20;
 
     // writing to pipes about ports
     write(fd1[1], &portEskihisar, sizeof(portEskihisar));
