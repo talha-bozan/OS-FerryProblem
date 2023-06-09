@@ -1,0 +1,266 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <unistd.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+#define VEHICLE_AMOUNT_FOR_EACH_TYPE 8
+#define WAITING_QUEUE_REMAINING_CAPACITY_YENIHISAR 30
+#define WAITING_QUEUE_REMAINING_CAPACITY_TOPCULAR 30
+
+typedef enum
+{
+    TRUCK,
+    BUS,
+    CAR,
+    MOTORCYCLE
+} VehicleType;
+
+// Struct for vehicle
+typedef struct
+{
+    VehicleType type;
+    int id;               // unique id for each vehicle
+    int size;             // 4 for truck, 3 for bus, 2 for car, 1 for motorcycle
+    int is_special_group; // 1 for is_special group, 0 for regular
+    int start_port;       // 0 for Eskihisar, 1 for Topcular
+    char status[20];      // "waiting", "boarding", "on_ferry", "arrived"
+    int line_id;          // 0 for Line1, 1 for Line2, 2 for Line3
+} Vehicle;
+
+// Struct for ferry
+typedef struct
+{
+    int id;
+    int capacity; // 30 units
+} Ferry;
+
+// Struct for port
+typedef struct
+{
+    int id;               // 0 for Eskihisar, 1 for Topcular
+    int ferry_id;         // id of the ferry at the port
+    int current_line;     // 0 for Line1, 1 for Line2, 2 for Line3
+    int line_capacity[3]; // 20 units each
+} Port;
+
+// Create and initialize for each vehicle type separately
+Vehicle trucks[VEHICLE_AMOUNT_FOR_EACH_TYPE];
+Vehicle buses[VEHICLE_AMOUNT_FOR_EACH_TYPE];
+Vehicle cars[VEHICLE_AMOUNT_FOR_EACH_TYPE];
+Vehicle motorcycles[VEHICLE_AMOUNT_FOR_EACH_TYPE];
+
+// Create and initialize the booths of Eskihisar port
+int boothEskihisar[4];
+
+// Create and initialize the booths of Topcular port
+int boothTopcular[4];
+
+// Create and initialize the first ferry struct
+Ferry ferry1;
+
+// Create and initialize the second ferry struct
+Ferry ferry2;
+
+// Create and initialize the Eskişehir port
+Port portEskihisar;
+
+// Create and initialize the Topcular port
+Port portTopcular;
+
+// these are for providing only one vehicle can enter or leave the ferry at a time
+sem_t sem_ferry1;
+sem_t sem_ferry2;
+
+// these are for providing only one queue can be accessed at a time in a specific port
+sem_t sem_portEskihisar_waiting_queue[3];
+sem_t sem_portTopcular_waiting_queue[3];
+
+// these are for deciding which booth will be used by the vehicle
+sem_t sem_boothEskihisar[4];
+sem_t sem_boothTopcular[4];
+
+void *vehicle_thread(void *arg)
+{
+    Vehicle *vehicle = (Vehicle *)arg;
+
+    char *vehicleType;
+
+    switch (vehicle->type)
+    {
+    case TRUCK:
+        vehicleType = "TRUCK";
+        break;
+    case BUS:
+        vehicleType = "BUS";
+        break;
+    case CAR:
+        vehicleType = "CAR";
+        break;
+    case MOTORCYCLE:
+        vehicleType = "MOTORCYCLE";
+        break;
+    default:
+        vehicleType = "UNKNOWN";
+    }
+
+    // Decide which port this vehicle belongs to
+    int *booths;
+    sem_t *sem_booths; // <-- changed to sem_t *
+
+    Port *port;
+    sem_t *sem_queues;
+
+    if (vehicle->start_port == 0)
+    {
+        booths = boothEskihisar;
+        sem_booths = sem_boothEskihisar;
+        port = &portEskihisar;
+        sem_queues = sem_portEskihisar_waiting_queue;
+    }
+    else
+    {
+        booths = boothTopcular;
+        sem_booths = sem_boothTopcular;
+        port = &portTopcular;
+        sem_queues = sem_portTopcular_waiting_queue;
+    }
+
+    // Vehicle chooses a booth randomly
+    int booth_id = vehicle->is_special_group ? rand() % 4 : rand() % 3;
+    printf("%s%d starting at port %d has selected booth %d because the speciality is %d\n",
+           vehicleType, vehicle->id, vehicle->start_port, booth_id, vehicle->is_special_group);
+    sem_wait(&sem_booths[booth_id]);
+    booths[booth_id]++; // Vehicle enters the booth
+    printf("%s%d starting at port %d has selected booth %d because the speciality is %d\n",
+           vehicleType, vehicle->id, vehicle->start_port, booth_id, vehicle->is_special_group);
+
+    // Simulation of the payment transaction
+    sleep(rand() % 3 + 1); // Sleeps between 1 to 3 seconds
+
+    booths[booth_id]--; // Vehicle leaves the booth
+    printf("%s%d starting at port %d has selected booth %d because the speciality is %d\n",
+           vehicleType, vehicle->id, vehicle->start_port, booth_id, vehicle->is_special_group);
+    sem_post(&sem_booths[booth_id]);
+
+    // Add vehicle to a waiting line
+    for (int i = 0; i < 3; i++)
+    {
+        int line_id = (i + port->current_line) % 3;
+
+        sem_wait(&sem_queues[line_id]);
+        // if waiting line is not full, then add vehicle to the current waiting line
+        if (port->line_capacity[line_id] >= vehicle->size)
+        {
+            vehicle->line_id = line_id;
+            port->line_capacity[line_id] -= vehicle->size;
+
+            printf("%s%d starting at port %d has been added to line %d\n",
+                   vehicleType, vehicle->id, vehicle->start_port, line_id);
+
+            sem_post(&sem_queues[line_id]);
+            break;
+        }
+
+        sem_post(&sem_queues[line_id]);
+    }
+
+    return NULL;
+}
+
+int main()
+{
+
+    // creating 2 pipes for each port to send and receive data
+    int fd1[2];
+    int fd2[2];
+
+    pipe(fd1); // from eskisehir to topcular
+    pipe(fd2); // from topcular to eskisehir
+
+    srand(time(NULL)); // Initialize random seed
+    int truck_id = 0;
+    int bus_id = 0;
+    int car_id = 0;
+    int motorcycle_id = 0;
+
+    for (int i = 0; i < VEHICLE_AMOUNT_FOR_EACH_TYPE; i++)
+    {
+        trucks[i].type = TRUCK;
+        trucks[i].id = truck_id++;
+        trucks[i].size = 4;
+        trucks[i].is_special_group = rand() % 2;
+        trucks[i].start_port = rand() % 2;
+
+        buses[i].type = BUS;
+        buses[i].id = bus_id++;
+        buses[i].size = 3;
+        buses[i].is_special_group = rand() % 2;
+        buses[i].start_port = rand() % 2;
+
+        cars[i].type = CAR;
+        cars[i].id = car_id++;
+        cars[i].size = 2;
+        cars[i].is_special_group = rand() % 2;
+        cars[i].start_port = rand() % 2;
+
+        motorcycles[i].type = MOTORCYCLE;
+        motorcycles[i].id = motorcycle_id++;
+        motorcycles[i].size = 1;
+        motorcycles[i].is_special_group = rand() % 2;
+        motorcycles[i].start_port = rand() % 2;
+    }
+
+    ferry1.id = 0;
+    ferry1.capacity = 30;
+
+    ferry2.id = 1;
+    ferry2.capacity = 30;
+
+    portEskihisar.id = 0;
+    portEskihisar.ferry_id = 0;
+    portEskihisar.current_line = 0;
+    portEskihisar.line_capacity[0] = 20;
+    portEskihisar.line_capacity[1] = 20;
+    portEskihisar.line_capacity[2] = 20;
+
+    portTopcular.id = 1;
+    portTopcular.ferry_id = 1;
+    portTopcular.current_line = 0;
+    portTopcular.line_capacity[0] = 20;
+    portTopcular.line_capacity[1] = 20;
+    portTopcular.line_capacity[2] = 20;
+
+    // writing to pipes about ports
+    write(fd1[1], &portEskihisar, sizeof(portEskihisar));
+    write(fd2[1], &portTopcular, sizeof(portTopcular));
+
+    // writing to pipes about ferries
+    // write(fd1[1], &ferry1, sizeof(ferry1));
+    write(fd2[1], &ferry2, sizeof(ferry2));
+
+    // reading from pipes
+    read(fd1[0], &portEskihisar, sizeof(portEskihisar));
+    read(fd2[0], &portTopcular, sizeof(portTopcular));
+
+    pthread_t threads[VEHICLE_AMOUNT_FOR_EACH_TYPE * 4];
+
+    for (int i = 0; i < VEHICLE_AMOUNT_FOR_EACH_TYPE; i++)
+    {
+        pthread_create(&threads[i * 4], NULL, vehicle_thread, &trucks[i]);
+        pthread_create(&threads[i * 4 + 1], NULL, vehicle_thread, &buses[i]);
+        pthread_create(&threads[i * 4 + 2], NULL, vehicle_thread, &cars[i]);
+        pthread_create(&threads[i * 4 + 3], NULL, vehicle_thread, &motorcycles[i]);
+    }
+
+    for (int i = 0; i < VEHICLE_AMOUNT_FOR_EACH_TYPE * 4; i++)
+    {
+        pthread_join(threads[i], NULL);
+    }
+
+    return 0;
+}
