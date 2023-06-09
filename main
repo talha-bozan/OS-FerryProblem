@@ -28,8 +28,8 @@ typedef struct
     int size;             // 4 for truck, 3 for bus, 2 for car, 1 for motorcycle
     int is_special_group; // 1 for is_special group, 0 for regular
     int start_port;       // 0 for Eskihisar, 1 for Topcular
-    char status[20];      // "waiting", "boarding", "on_ferry", "arrived"
     int line_id;          // 0 for Line1, 1 for Line2, 2 for Line3
+    char *status;         // "waiting", "boarding", "on_ferry", "off_ferry"
 } Vehicle;
 
 // Struct for ferry
@@ -136,15 +136,12 @@ void *vehicle_thread(void *arg)
            vehicleType, vehicle->id, vehicle->start_port, booth_id, vehicle->is_special_group);
     sem_wait(&sem_booths[booth_id]);
     booths[booth_id]++; // Vehicle enters the booth
-    printf("%s%d starting at port %d has selected booth %d because the speciality is %d\n",
-           vehicleType, vehicle->id, vehicle->start_port, booth_id, vehicle->is_special_group);
 
     // Simulation of the payment transaction
-    sleep(rand() % 3 + 1); // Sleeps between 1 to 3 seconds
+    // sleep(rand() % 3 + 1); // Sleeps between 1 to 3 seconds
 
     booths[booth_id]--; // Vehicle leaves the booth
-    printf("%s%d starting at port %d has selected booth %d because the speciality is %d\n",
-           vehicleType, vehicle->id, vehicle->start_port, booth_id, vehicle->is_special_group);
+
     sem_post(&sem_booths[booth_id]);
 
     // Add vehicle to a waiting line
@@ -156,12 +153,11 @@ void *vehicle_thread(void *arg)
         // if waiting line is not full, then add vehicle to the current waiting line
         if (port->line_capacity[line_id] >= vehicle->size)
         {
-            vehicle->line_id = line_id;
             port->line_capacity[line_id] -= vehicle->size;
-
-            printf("%s%d starting at port %d has been added to line %d\n",
+            vehicle->line_id = line_id;
+            vehicle->status = "waiting";
+            printf("%s%d starting at port %d has entered the waiting queue %d\n",
                    vehicleType, vehicle->id, vehicle->start_port, line_id);
-
             sem_post(&sem_queues[line_id]);
             break;
         }
@@ -174,6 +170,16 @@ void *vehicle_thread(void *arg)
 
 int main()
 {
+    for (int i = 0; i < 4; i++)
+    {
+        sem_init(&sem_boothEskihisar[i], 0, 1);
+        sem_init(&sem_boothTopcular[i], 0, 1);
+        if (i < 3)
+        {
+            sem_init(&sem_portEskihisar_waiting_queue[i], 0, 1);
+            sem_init(&sem_portTopcular_waiting_queue[i], 0, 1);
+        }
+    }
 
     // creating 2 pipes for each port to send and receive data
     int fd1[2];
