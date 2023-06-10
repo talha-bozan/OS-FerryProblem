@@ -29,7 +29,7 @@ typedef struct
     int is_special_group; // 1 for is_special group, 0 for regular
     int start_port;       // 0 for Eskihisar, 1 for Topcular
     int line_id;          // 0 for Line1, 1 for Line2, 2 for Line3
-    char *status;         // "waiting", "boarding", "on_ferry", "off_ferry"
+    char *status;         // "waiting", "boarding", "on_ferry", "off_ferry", "arrived"
 } Vehicle;
 
 // Node for queue
@@ -56,10 +56,11 @@ typedef struct Queue
 // Struct for port
 typedef struct
 {
-    int id;                 // 0 for Eskihisar, 1 for Topcular
-    int ferry_id;           // id of the ferry at the port
-    int current_line;       // 0 for Line1, 1 for Line2, 2 for Line3
-    Queue waiting_queue[3]; // 3 waiting queues
+    int id;                    // 0 for Eskihisar, 1 for Topcular
+    int ferry_id;              // id of the ferry at the port
+    int current_line;          // 0 for Line1, 1 for Line2, 2 for Line3
+    Queue waiting_queue[3];    // 3 waiting queues
+    Queue gettingBackqueue[3]; // 3 getting back queues
 } Port;
 
 // Create and initialize for each vehicle type separately
@@ -142,6 +143,7 @@ Vehicle *dequeue(Queue *q)
         q->rear = NULL;
     }
 
+    q->capacity += v->size; // Increase queue capacity
     free(temp);
     q->size--;
 
@@ -202,8 +204,7 @@ void *vehicle_thread(void *arg)
 
     // Vehicle chooses a booth randomly
     int booth_id = vehicle->is_special_group ? rand() % 4 : rand() % 3;
-    printf("%s%d starting at port %d has selected booth %d because the speciality is %d\n",
-           vehicleType, vehicle->id, vehicle->start_port, booth_id, vehicle->is_special_group);
+    // printf("%s%d starting at port %d has selected booth %d because the speciality is %d\n" vehicleType, vehicle->id, vehicle->start_port, booth_id, vehicle->is_special_group);
     sem_wait(&sem_booths[booth_id]);
     booths[booth_id]++; // Vehicle enters the booth
 
@@ -221,10 +222,12 @@ void *vehicle_thread(void *arg)
 
         sem_wait(&sem_queues[line_id]);
         // if waiting line is not full, then add vehicle to the current waiting line
-        if (get_queue_size(&port->waiting_queue[line_id]) + vehicle->size <= port->waiting_queue[line_id].capacity)
+        if (vehicle->size <= port->waiting_queue[line_id].capacity)
         {
             enqueue(&port->waiting_queue[line_id], vehicle);
+            port->waiting_queue[line_id].capacity -= vehicle->size;
             vehicle->status = "waiting";
+
             printf("%s%d starting at port %d has entered the waiting queue %d and the order is %d\n",
                    vehicleType, vehicle->id, vehicle->start_port, line_id, get_queue_size(&port->waiting_queue[line_id]));
 
@@ -233,6 +236,65 @@ void *vehicle_thread(void *arg)
         }
 
         sem_post(&sem_queues[line_id]);
+    }
+
+    return NULL;
+}
+
+void *ferry_thread(void *arg)
+{
+    Ferry *ferry = (Ferry *)arg;
+    Port *port;
+    sem_t *sem_queues;
+
+    if (ferry->id == portEskihisar.ferry_id)
+    {
+        port = &portEskihisar;
+        sem_queues = sem_portEskihisar_waiting_queue;
+    }
+    else
+    {
+        port = &portTopcular;
+        sem_queues = sem_portTopcular_waiting_queue;
+    }
+
+    while (1)
+    {
+        // close the other two lines and open the current line
+        for (int i = 0; i < 3; i++)
+        {
+            if (i != port->current_line)
+                sem_wait(&sem_queues[i]);
+        }
+
+        while (get_queue_size(&port->waiting_queue[port->current_line]) > 0 && ferry->capacity > 0)
+        {
+            sem_wait(&sem_queues[port->current_line]);
+            Vehicle *vehicle = dequeue(&port->waiting_queue[port->current_line]);
+            // enqueue(&port->gettingBackqueue[port->current_line], vehicle);
+            if (vehicle != NULL && ferry->capacity >= vehicle->size)
+            {
+                ferry->capacity -= vehicle->size;
+                vehicle->status = "on_ferry";
+                printf("Vehicle %d of type %d has boarded on ferry %d. Remaining capacity of ferry: %d\n",
+                       vehicle->id, vehicle->type, ferry->id, ferry->capacity);
+            }
+            else
+            {
+                enqueue(&port->waiting_queue[port->current_line], vehicle);
+            }
+            sem_post(&sem_queues[port->current_line]);
+        }
+
+        // After a line has been processed, the current line points to the next line
+        port->current_line = (port->current_line + 1) % 3;
+
+        // open the other two lines and close the current line
+        for (int i = 0; i < 3; i++)
+        {
+            if (i != port->current_line)
+                sem_post(&sem_queues[i]);
+        }
     }
 
     return NULL;
@@ -323,8 +385,9 @@ int main()
     read(fd1[0], &portEskihisar, sizeof(portEskihisar));
     read(fd2[0], &portTopcular, sizeof(portTopcular));
 
-    pthread_t threads[VEHICLE_AMOUNT_FOR_EACH_TYPE * 4];
+    pthread_t threads[VEHICLE_AMOUNT_FOR_EACH_TYPE * 4 + 2]; // additional 2 threads for the ferries
 
+    // create vehicle threads
     for (int i = 0; i < VEHICLE_AMOUNT_FOR_EACH_TYPE; i++)
     {
         pthread_create(&threads[i * 4], NULL, vehicle_thread, &trucks[i]);
@@ -333,7 +396,12 @@ int main()
         pthread_create(&threads[i * 4 + 3], NULL, vehicle_thread, &motorcycles[i]);
     }
 
-    for (int i = 0; i < VEHICLE_AMOUNT_FOR_EACH_TYPE * 4; i++)
+    // create ferry threads
+    pthread_create(&threads[VEHICLE_AMOUNT_FOR_EACH_TYPE * 4], NULL, ferry_thread, &ferry1);
+    pthread_create(&threads[VEHICLE_AMOUNT_FOR_EACH_TYPE * 4 + 1], NULL, ferry_thread, &ferry2);
+
+    // join vehicle threads
+    for (int i = 0; i < VEHICLE_AMOUNT_FOR_EACH_TYPE * 4 + 2; i++)
     {
         pthread_join(threads[i], NULL);
     }
