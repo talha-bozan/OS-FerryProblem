@@ -276,27 +276,32 @@ void *ferry_thread(void *arg)
         {
             if (i != port->current_line)
                 sem_wait(&sem_queues[i]);
+            else
+                sem_post(&sem_queues[i]);
         }
 
         while (get_queue_size(&port->waiting_queue[port->current_line]) > 0 && ferry->capacity > 0)
         {
             sem_wait(&sem_queues[port->current_line]);
-            Vehicle *vehicle = dequeue(&port->waiting_queue[port->current_line]);
+            // check the first vehicle in the queue without dequeue
+            Vehicle *vehicle = peek(&port->waiting_queue[port->current_line]);
+
             // enqueue(&port->gettingBackqueue[port->current_line], vehicle);
             if (vehicle != NULL && ferry->capacity >= vehicle->size)
             {
+                port->waiting_queue[port->current_line].capacity += vehicle->size;
                 sem_wait(sem_ferry);
                 ferry->capacity -= vehicle->size;
                 sem_post(sem_ferry);
                 vehicle->status = "on_ferry";
-                port->waiting_queue[port->current_line].capacity += vehicle->size;
-
                 printf("Vehicle %d of type %d has boarded on ferry %d. Remaining capacity of ferry: %d\n",
                        vehicle->id, vehicle->type, ferry->id, ferry->capacity);
+                dequeue(&port->waiting_queue[port->current_line]);
             }
             else
             {
-                enqueue(&port->waiting_queue[port->current_line], vehicle);
+                sem_post(&sem_queues[port->current_line]);
+                break;
             }
             sem_post(&sem_queues[port->current_line]);
         }
