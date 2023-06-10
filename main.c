@@ -155,6 +155,15 @@ int get_queue_size(Queue *q)
     return q->size;
 }
 
+// Peek the first element of the queue
+Vehicle *peek(Queue *q)
+{
+    if (q->front == NULL)
+        return NULL; // Queue is empty
+
+    return q->front->vehicle;
+}
+
 void *vehicle_thread(void *arg)
 {
     Vehicle *vehicle = (Vehicle *)arg;
@@ -245,16 +254,19 @@ void *ferry_thread(void *arg)
     Ferry *ferry = (Ferry *)arg;
     Port *port;
     sem_t *sem_queues;
+    sem_t *sem_ferry;
 
     if (ferry->id == portEskihisar.ferry_id)
     {
         port = &portEskihisar;
         sem_queues = sem_portEskihisar_waiting_queue;
+        sem_ferry = &sem_ferry1;
     }
     else
     {
         port = &portTopcular;
         sem_queues = sem_portTopcular_waiting_queue;
+        sem_ferry = &sem_ferry2;
     }
 
     while (1)
@@ -273,9 +285,12 @@ void *ferry_thread(void *arg)
             // enqueue(&port->gettingBackqueue[port->current_line], vehicle);
             if (vehicle != NULL && ferry->capacity >= vehicle->size)
             {
+                sem_wait(sem_ferry);
                 ferry->capacity -= vehicle->size;
+                sem_post(sem_ferry);
                 vehicle->status = "on_ferry";
-                port->waiting_queue[port->current_line].capacity += vehicle->size; // Increase queue capacity as vehicle is leaving
+                port->waiting_queue[port->current_line].capacity += vehicle->size;
+
                 printf("Vehicle %d of type %d has boarded on ferry %d. Remaining capacity of ferry: %d\n",
                        vehicle->id, vehicle->type, ferry->id, ferry->capacity);
             }
@@ -319,12 +334,8 @@ int main()
         }
     }
 
-    // creating 2 pipes for each port to send and receive data
-    int fd1[2];
-    int fd2[2];
-
-    pipe(fd1); // from eskisehir to topcular
-    pipe(fd2); // from topcular to eskisehir
+    sem_init(&sem_ferry1, 0, 1);
+    sem_init(&sem_ferry2, 0, 1);
 
     srand(time(NULL)); // Initialize random seed
     int truck_id = 0;
@@ -372,18 +383,6 @@ int main()
     portTopcular.id = 1;
     portTopcular.ferry_id = 1;
     portTopcular.current_line = 0;
-
-    // writing to pipes about ports
-    write(fd1[1], &portEskihisar, sizeof(portEskihisar));
-    write(fd2[1], &portTopcular, sizeof(portTopcular));
-
-    // writing to pipes about ferries
-    // write(fd1[1], &ferry1, sizeof(ferry1));
-    write(fd2[1], &ferry2, sizeof(ferry2));
-
-    // reading from pipes
-    read(fd1[0], &portEskihisar, sizeof(portEskihisar));
-    read(fd2[0], &portTopcular, sizeof(portTopcular));
 
     pthread_t threads[VEHICLE_AMOUNT_FOR_EACH_TYPE * 4 + 2]; // additional 2 threads for the ferries
 
