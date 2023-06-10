@@ -32,12 +32,6 @@ typedef struct
     char *status;         // "waiting", "boarding", "on_ferry", "off_ferry"
 } Vehicle;
 
-// Node for queue
-typedef struct Node
-{
-    Vehicle *vehicle;
-    struct Node *next;
-} Node;
 // Struct for ferry
 typedef struct
 {
@@ -45,21 +39,13 @@ typedef struct
     int capacity; // 30 units
 } Ferry;
 
-// Queue data structure
-typedef struct Queue
-{
-    Node *front;
-    Node *rear;
-    int size;
-    int capacity;
-} Queue;
 // Struct for port
 typedef struct
 {
-    int id;                 // 0 for Eskihisar, 1 for Topcular
-    int ferry_id;           // id of the ferry at the port
-    int current_line;       // 0 for Line1, 1 for Line2, 2 for Line3
-    Queue waiting_queue[3]; // 3 waiting queues
+    int id;               // 0 for Eskihisar, 1 for Topcular
+    int ferry_id;         // id of the ferry at the port
+    int current_line;     // 0 for Line1, 1 for Line2, 2 for Line3
+    int line_capacity[3]; // 20 units each
 } Port;
 
 // Create and initialize for each vehicle type separately
@@ -69,10 +55,19 @@ Vehicle cars[VEHICLE_AMOUNT_FOR_EACH_TYPE];
 Vehicle motorcycles[VEHICLE_AMOUNT_FOR_EACH_TYPE];
 
 // Create and initialize the booths of Eskihisar port
-int boothEskihisar[4];
+int boothEskihisar[4][10];
+int next_empty_0_eskihisar = 0;
+int next_empty_1_eskihisar = 0;
+int next_empty_2_eskihisar = 0;
+int next_empty_3_eskihisar = 0;
+
 
 // Create and initialize the booths of Topcular port
-int boothTopcular[4];
+int boothTopcular[4][10];
+int next_empty_0_topcular = 0;
+int next_empty_1_topcular = 0;
+int next_empty_2_topcular = 0;
+int next_empty_3_topcular = 0;
 
 // Create and initialize the first ferry struct
 Ferry ferry1;
@@ -97,62 +92,6 @@ sem_t sem_portTopcular_waiting_queue[3];
 // these are for deciding which booth will be used by the vehicle
 sem_t sem_boothEskihisar[4];
 sem_t sem_boothTopcular[4];
-
-// Initialize a queue
-void init_queue(Queue *q, int max_capacity)
-{
-    q->front = q->rear = NULL;
-    q->size = 0;
-    q->capacity = max_capacity;
-}
-
-// Add an element to the end of the queue
-void enqueue(Queue *q, Vehicle *v)
-{
-    Node *new_node = malloc(sizeof(Node));
-    new_node->vehicle = v;
-    new_node->next = NULL;
-
-    if (q->rear == NULL)
-    {
-        q->front = q->rear = new_node;
-    }
-    else
-    {
-        q->rear->next = new_node;
-        q->rear = new_node;
-    }
-
-    q->size++;
-}
-
-// Remove an element from the front of the queue
-Vehicle *dequeue(Queue *q)
-{
-    if (q->front == NULL)
-        return NULL; // Queue is empty
-
-    Node *temp = q->front;
-
-    Vehicle *v = temp->vehicle;
-    q->front = q->front->next;
-
-    if (q->front == NULL)
-    {
-        q->rear = NULL;
-    }
-
-    free(temp);
-    q->size--;
-
-    return v;
-}
-
-// Get the size of the queue
-int get_queue_size(Queue *q)
-{
-    return q->size;
-}
 
 void *vehicle_thread(void *arg)
 {
@@ -181,20 +120,19 @@ void *vehicle_thread(void *arg)
     // Decide which port this vehicle belongs to
     int *booths;
     sem_t *sem_booths; // <-- changed to sem_t *
-
     Port *port;
     sem_t *sem_queues;
 
     if (vehicle->start_port == 0)
     {
-        booths = boothEskihisar;
+        booths = *boothEskihisar;
         sem_booths = sem_boothEskihisar;
         port = &portEskihisar;
         sem_queues = sem_portEskihisar_waiting_queue;
     }
     else
     {
-        booths = boothTopcular;
+        booths = *boothTopcular;
         sem_booths = sem_boothTopcular;
         port = &portTopcular;
         sem_queues = sem_portTopcular_waiting_queue;
@@ -204,48 +142,101 @@ void *vehicle_thread(void *arg)
     int booth_id = vehicle->is_special_group ? rand() % 4 : rand() % 3;
     printf("%s%d starting at port %d has selected booth %d because the speciality is %d\n",
            vehicleType, vehicle->id, vehicle->start_port, booth_id, vehicle->is_special_group);
+
     sem_wait(&sem_booths[booth_id]);
-    booths[booth_id]++; // Vehicle enters the booth
+    
+    //choose which index to use
+    int *next_empty;
+    if (port == &portEskihisar)
+    {
+        switch (booth_id)
+        {
+        case 0:
+            next_empty = &next_empty_0_eskihisar;
+            boothEskihisar[0][next_empty_0_eskihisar] = vehicle->id;
+            next_empty_0_eskihisar++;
+            break;
+        case 1:
+            next_empty = &next_empty_1_eskihisar;
+            boothEskihisar[1][next_empty_1_eskihisar] = vehicle->id;
+            next_empty_1_eskihisar++;
+            break;
+        case 2:
+            next_empty = &next_empty_2_eskihisar;
+            boothEskihisar[2][next_empty_2_eskihisar] = vehicle->id;
+            next_empty_2_eskihisar++;
+            break;
+        case 3:
+            next_empty = &next_empty_3_eskihisar;
+            boothEskihisar[3][next_empty_3_eskihisar] = vehicle->id;
+            next_empty_3_eskihisar++;
+            break;
+        }
+    }
+    else
+    {
+        switch (booth_id)
+        {
+        case 0:
+            next_empty = &next_empty_0_topcular;
+            boothTopcular[0][next_empty_0_topcular] = vehicle->id;
+            next_empty_0_topcular++;
+            break;
+        case 1:
+            next_empty = &next_empty_1_topcular;
+            boothTopcular[1][next_empty_1_topcular] = vehicle->id;
+            next_empty_1_topcular++;
+            break;
+        case 2:
+            next_empty = &next_empty_2_topcular;
+            boothTopcular[2][next_empty_2_topcular] = vehicle->id;
+            next_empty_2_topcular++;
+            break;
+        case 3:
+            next_empty = &next_empty_3_topcular;
+            boothTopcular[3][next_empty_3_topcular] = vehicle->id;
+            next_empty_3_topcular++;
 
-    // Simulation of the payment transaction
-    // sleep(rand() % 3 + 1); // Sleeps between 1 to 3 seconds
+            break;
+        }
+    }
 
-    booths[booth_id]--; // Vehicle leaves the booth
+    //Simulation of the payment transaction
+    //sleep(rand() % 3 + 1); // Sleeps between 1 to 3 seconds
+
+   // booths[booth_id]--; // Vehicle leaves the booth
 
     sem_post(&sem_booths[booth_id]);
 
     // Add vehicle to a waiting line
-    for (int i = 0; i < 3; i++)
+    /*for (int i = 0; i < 3; i++)
     {
         int line_id = (i + port->current_line) % 3;
 
         sem_wait(&sem_queues[line_id]);
         // if waiting line is not full, then add vehicle to the current waiting line
-        if (get_queue_size(&port->waiting_queue[line_id]) + vehicle->size <= port->waiting_queue[line_id].capacity)
+        if (port->line_capacity[line_id] >= vehicle->size)
         {
-            enqueue(&port->waiting_queue[line_id], vehicle);
+            port->line_capacity[line_id] -= vehicle->size;
+            vehicle->line_id = line_id;
             vehicle->status = "waiting";
-            printf("%s%d starting at port %d has entered the waiting queue %d and the order is %d\n",
-                   vehicleType, vehicle->id, vehicle->start_port, line_id, get_queue_size(&port->waiting_queue[line_id]));
-
+            printf("%s%d starting at port %d has entered the waiting queue %d\n",
+                   vehicleType, vehicle->id, vehicle->start_port, line_id);
             sem_post(&sem_queues[line_id]);
             break;
         }
 
         sem_post(&sem_queues[line_id]);
-    }
+    } */
 
+    //finish thread 
+
+    
     return NULL;
 }
 
 int main()
-{ // Initialize the waiting queues
-    for (int i = 0; i < 3; i++)
-    {
-        init_queue(&portEskihisar.waiting_queue[i], 20);
-        init_queue(&portTopcular.waiting_queue[i], 20);
-    }
-
+{
     for (int i = 0; i < 4; i++)
     {
         sem_init(&sem_boothEskihisar[i], 0, 1);
@@ -306,10 +297,16 @@ int main()
     portEskihisar.id = 0;
     portEskihisar.ferry_id = 0;
     portEskihisar.current_line = 0;
+    portEskihisar.line_capacity[0] = 20;
+    portEskihisar.line_capacity[1] = 20;
+    portEskihisar.line_capacity[2] = 20;
 
     portTopcular.id = 1;
     portTopcular.ferry_id = 1;
     portTopcular.current_line = 0;
+    portTopcular.line_capacity[0] = 20;
+    portTopcular.line_capacity[1] = 20;
+    portTopcular.line_capacity[2] = 20;
 
     // writing to pipes about ports
     write(fd1[1], &portEskihisar, sizeof(portEskihisar));
@@ -337,6 +334,39 @@ int main()
     {
         pthread_join(threads[i], NULL);
     }
+
+
+
+
+    //print yenihisar booths
+    printf("Port 0 Yenihisar booths:\n");
+    for (int i = 0; i < 4; i++)
+    {
+        printf("Booth %d: ", i);
+        for (int j = 0; j < 10; j++)
+        {
+            printf("%d ", boothEskihisar[i][j]);
+        }
+        printf("\n");
+    }
+
+
+    printf("\n");
+
+
+    //print topcular booths
+    printf("Port 1 Topcular booths:\n");
+    for (int i = 0; i < 4; i++)
+    {
+        printf("Booth %d: ", i);
+        for (int j = 0; j < 10; j++)
+        {
+            printf("%d ", boothTopcular[i][j]);
+        }
+        printf("\n");
+    }
+
+    
 
     return 0;
 }
