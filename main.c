@@ -143,7 +143,6 @@ Vehicle *dequeue(Queue *q)
         q->rear = NULL;
     }
 
-    q->capacity += v->size; // Increase queue capacity
     free(temp);
     q->size--;
 
@@ -276,6 +275,7 @@ void *ferry_thread(void *arg)
             {
                 ferry->capacity -= vehicle->size;
                 vehicle->status = "on_ferry";
+                port->waiting_queue[port->current_line].capacity += vehicle->size; // Increase queue capacity as vehicle is leaving
                 printf("Vehicle %d of type %d has boarded on ferry %d. Remaining capacity of ferry: %d\n",
                        vehicle->id, vehicle->type, ferry->id, ferry->capacity);
             }
