@@ -227,6 +227,7 @@ void *vehicle_thread(void *arg)
     // printf("%s%d starting at port %d has selected booth %d because the speciality is %d\n" vehicleType, vehicle->id, vehicle->start_port, booth_id, vehicle->is_special_group);
     sem_wait(&sem_booths[booth_id]);
     booths[booth_id]++; // Vehicle enters the booth
+    printf("%s%d starting at port %d has entered the booth %d\n", vehicleType, vehicle->id, vehicle->start_port, booth_id);
 
     // Simulation of the payment transaction
     // sleep(rand() % 3 + 1); // Sleeps between 1 to 3 seconds
@@ -354,7 +355,7 @@ void *ferry_thread(void *arg)
         {
             printf("Ferry %d is moving to port %d\n", ferry->id, ferry->destination_port);
 
-            sleep(2);
+            sleep(6);
             sem_wait(sem_ferry);
             ferry->capacity = 30;
             port->ferry_id = !ferry->id; // burda porttaki ferry değişti
@@ -372,10 +373,11 @@ void *ferry_thread(void *arg)
                 sem_wait(sem_ferry);
                 Vehicle *vehicleTemp = dequeue(&ferry->ferryQueue);
                 vehicleTemp->remaining_trip_time--;
-
+                sleep(1);
                 if (vehicleTemp->remaining_trip_time == 0)
                 {
                     printf("Vehicle %d of type %d has left the system\n", vehicleTemp->id, vehicleTemp->type);
+                    sleep(1);
                     pthread_exit(NULL);
                 }
 
@@ -463,17 +465,15 @@ int main()
         trucks[i].start_port = rand() % 2;
         trucks[i].destination_port = trucks[i].start_port == 0 ? 1 : 0;
         trucks[i].remaining_trip_time = 2;
+        printf("Truck %d was created at port %d\n", trucks[i].id, trucks[i].start_port);
 
-        printf("%d\n", trucks[i].start_port);
         if (trucks[i].start_port == 0)
         {
             enqueue(&portEskihisar.gettingBackqueue, &trucks[i]);
-            printf("Eskihisar getting back size: %d", portEskihisar.gettingBackqueue.size);
         }
         else
         {
             enqueue(&portTopcular.gettingBackqueue, &trucks[i]);
-            printf("Topcular getting back size: %d", portTopcular.gettingBackqueue.size);
         }
 
         buses[i].type = BUS;
@@ -483,16 +483,15 @@ int main()
         buses[i].start_port = rand() % 2;
         buses[i].destination_port = trucks[i].start_port == 0 ? 1 : 0;
         buses[i].remaining_trip_time = 2;
+        printf("Bus %d was created at port %d\n", buses[i].id, buses[i].start_port);
 
         if (buses[i].start_port == 0)
         {
             enqueue(&portEskihisar.gettingBackqueue, &buses[i]);
-            printf("Eskihisar getting back size: %d", portEskihisar.gettingBackqueue.size);
         }
         else
         {
             enqueue(&portTopcular.gettingBackqueue, &buses[i]);
-            printf("Topcular getting back size: %d", portTopcular.gettingBackqueue.size);
         }
 
         cars[i].type = CAR;
@@ -502,16 +501,15 @@ int main()
         cars[i].start_port = rand() % 2;
         cars[i].destination_port = trucks[i].start_port == 0 ? 1 : 0;
         cars[i].remaining_trip_time = 2;
+        printf("Car %d was created at port %d\n", cars[i].id, cars[i].start_port);
 
         if (cars[i].start_port == 0)
         {
             enqueue(&portEskihisar.gettingBackqueue, &cars[i]);
-            printf("Eskihisar getting back size: %d", portEskihisar.gettingBackqueue.size);
         }
         else
         {
             enqueue(&portTopcular.gettingBackqueue, &cars[i]);
-            printf("Topcular getting back size: %d", portTopcular.gettingBackqueue.size);
         }
 
         motorcycles[i].type = MOTORCYCLE;
@@ -521,22 +519,17 @@ int main()
         motorcycles[i].start_port = rand() % 2;
         motorcycles[i].destination_port = trucks[i].start_port == 0 ? 1 : 0;
         motorcycles[i].remaining_trip_time = 2;
+        printf("Motorcycle %d was created at port %d\n", motorcycles[i].id, motorcycles[i].start_port);
 
         if (motorcycles[i].start_port == 0)
         {
             enqueue(&portEskihisar.gettingBackqueue, &motorcycles[i]);
-            printf("Eskihisar getting back size: %d", portEskihisar.gettingBackqueue.size);
         }
         else
         {
             enqueue(&portTopcular.gettingBackqueue, &motorcycles[i]);
-            printf("Topcular getting back size: %d", portTopcular.gettingBackqueue.size);
         }
     }
-
-    // print getting back queue sizes
-    printf("\nEskihisar getting back size: %d\n", portEskihisar.gettingBackqueue.size);
-    printf("Topcular getting back size: %d\n", portTopcular.gettingBackqueue.size);
 
     pthread_t threads[VEHICLE_AMOUNT_FOR_EACH_TYPE * 4 + 2]; // additional 2 threads for the ferries, 1 thread for the timer
 
@@ -565,43 +558,5 @@ int main()
         pthread_join(threads[i], NULL);
     }
 
-    int size_Eskihisar = portEskihisar.gettingBackqueue.size;
-    int sizeTopcular = portTopcular.gettingBackqueue.size;
-
-    // make equals gettingbackquque to gettingbackqueue2
-    for (int i = 0; i < size_Eskihisar; i++)
-    {
-        enqueue(&portEskihisar.gettingBackqueue2, dequeue(&portEskihisar.gettingBackqueue));
-    }
-
-    for (int i = 0; i < sizeTopcular; i++)
-    {
-        enqueue(&portTopcular.gettingBackqueue2, dequeue(&portTopcular.gettingBackqueue));
-    }
-
-    size_Eskihisar = portEskihisar.gettingBackqueue2.size;
-    sizeTopcular = portTopcular.gettingBackqueue2.size;
-    pthread_t threadsHH[sizeTopcular + size_Eskihisar];
-    // create vehicle threads for getting back queue2
-    for (int i = 0; i < size_Eskihisar; i++)
-    {
-        printf("bb%d", i);
-        pthread_create(&threadsHH[i], NULL, vehicle_thread, dequeue(&portEskihisar.gettingBackqueue2));
-    }
-
-    for (int i = 0; i < sizeTopcular; i++)
-    {
-        printf("kk%d", i);
-        pthread_create(&threadsHH[i + size_Eskihisar], NULL, vehicle_thread, dequeue(&portTopcular.gettingBackqueue2));
-    }
-    sleep(1);
-
-    printf("YYYYYYYYYYYYYY");
-    /*
-        for (int i = 0; i < size_Eskihisar + sizeTopcular; i++)
-        {
-
-            pthread_join(threadsHH[i], NULL);
-        }*/
     return 0;
 }
