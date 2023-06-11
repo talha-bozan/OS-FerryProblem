@@ -43,6 +43,8 @@ typedef struct
 {
     int id;
     int capacity; // 30 units
+    bool stop1;
+    bool stop2;
 } Ferry;
 
 // Queue data structure
@@ -251,7 +253,10 @@ void *vehicle_thread(void *arg)
 
 void *ferry_thread(void *arg)
 {
+
     Ferry *ferry = (Ferry *)arg;
+    bool stop1 = ferry->stop1;
+    bool stop2 = ferry->stop2;
     Port *port;
     sem_t *sem_queues;
     sem_t *sem_ferry;
@@ -268,9 +273,15 @@ void *ferry_thread(void *arg)
         sem_queues = sem_portTopcular_waiting_queue;
         sem_ferry = &sem_ferry2;
     }
+    Vehicle *vehicle = peek(&port->waiting_queue[port->current_line]);
 
     while (1)
     {
+        if (stop1 == 1)
+        {
+            break;
+        }
+
         // close the other two lines and open the current line
         for (int i = 0; i < 3; i++)
         {
@@ -280,8 +291,12 @@ void *ferry_thread(void *arg)
                 sem_post(&sem_queues[i]);
         }
 
-        while (get_queue_size(&port->waiting_queue[port->current_line]) > 0 && ferry->capacity > 0)
+        while ((get_queue_size(&port->waiting_queue[port->current_line]) > 0 && ferry->capacity >= vehicle->size))
         {
+            if (stop2 == 1)
+            {
+                break;
+            }
             sem_wait(&sem_queues[port->current_line]);
             // check the first vehicle in the queue without dequeue
             Vehicle *vehicle = peek(&port->waiting_queue[port->current_line]);
@@ -296,13 +311,19 @@ void *ferry_thread(void *arg)
                 vehicle->status = "on_ferry";
                 printf("Vehicle %d of type %d has boarded on ferry %d. Remaining capacity of ferry: %d\n",
                        vehicle->id, vehicle->type, ferry->id, ferry->capacity);
-                dequeue(&port->waiting_queue[port->current_line]);
+                // printf("vehicle size: %dand my ferry id is %d\n", vehicle->size, ferry->id);
+                // printf("que size is %d aaand ferry capacity is %d\n", get_queue_size(&port->waiting_queue[port->current_line]), ferry->capacity);
+                // printf("bak bu doru olabilir mi? %d\n", ferry->capacity > vehicle->size);
+
+                Vehicle *vehicleTemp = dequeue(&port->waiting_queue[port->current_line]);
+                enqueue(&port->gettingBackqueue[port->current_line], vehicleTemp);
             }
             else
             {
-                sem_post(&sem_queues[port->current_line]);
-                break;
+                stop1 = 1;
+                stop2 = 1;
             }
+
             sem_post(&sem_queues[port->current_line]);
         }
 
@@ -314,6 +335,38 @@ void *ferry_thread(void *arg)
         {
             if (i != port->current_line)
                 sem_post(&sem_queues[i]);
+        }
+        if (vehicle->size >= ferry->capacity)
+        {
+            if (port->id == 0)
+            {
+                port->id = 1;
+            }
+            else
+            {
+                port->id = 0;
+            }
+
+            printf("Ferry %d is moving to port %d\n", ferry->id, port->id);
+            ferry->capacity = 30;
+            stop1 = 1;
+            stop2 = 1;
+        }
+        // printf("stop 1 is %d and stop 2 is %d\n", stop1, stop2);
+    }
+    sleep(1);
+
+    // print the waiting queue of the ports
+    // enque the waiting port from getting back queue
+
+    for (int i = 0; i < 3; i++)
+    {
+        while (get_queue_size(&port->gettingBackqueue[i]) > 0)
+        {
+            sem_wait(&sem_queues[i]);
+            Vehicle *vehicle = dequeue(&port->gettingBackqueue[i]);
+            enqueue(&port->waiting_queue[i], vehicle);
+            sem_post(&sem_queues[i]);
         }
     }
 
@@ -389,7 +442,7 @@ int main()
     portTopcular.ferry_id = 1;
     portTopcular.current_line = 0;
 
-    pthread_t threads[VEHICLE_AMOUNT_FOR_EACH_TYPE * 4 + 2]; // additional 2 threads for the ferries
+    pthread_t threads[VEHICLE_AMOUNT_FOR_EACH_TYPE * 4 + 2]; // additional 2 threads for the ferries, 1 thread for the timer
 
     // create vehicle threads
     for (int i = 0; i < VEHICLE_AMOUNT_FOR_EACH_TYPE; i++)
