@@ -68,6 +68,7 @@ typedef struct
     int current_line;       // 0 for Line1, 1 for Line2, 2 for Line3
     Queue waiting_queue[3]; // 3 waiting queues
     Queue gettingBackqueue; // 3 getting back queues
+    Queue gettingBackqueue2;
 } Port;
 
 // Create and initialize for each vehicle type separately
@@ -353,7 +354,7 @@ void *ferry_thread(void *arg)
         {
             printf("Ferry %d is moving to port %d\n", ferry->id, ferry->destination_port);
 
-            sleep(6);
+            sleep(2);
             sem_wait(sem_ferry);
             ferry->capacity = 30;
             port->ferry_id = !ferry->id; // burda porttaki ferry değişti
@@ -567,21 +568,40 @@ int main()
     int size_Eskihisar = portEskihisar.gettingBackqueue.size;
     int sizeTopcular = portTopcular.gettingBackqueue.size;
 
+    // make equals gettingbackquque to gettingbackqueue2
     for (int i = 0; i < size_Eskihisar; i++)
     {
-        pthread_create(&threads[i], NULL, vehicle_thread, dequeue(&portEskihisar.gettingBackqueue));
+        enqueue(&portEskihisar.gettingBackqueue2, dequeue(&portEskihisar.gettingBackqueue));
     }
 
     for (int i = 0; i < sizeTopcular; i++)
     {
-        pthread_create(&threads[i + size_Eskihisar], NULL, vehicle_thread, dequeue(&portTopcular.gettingBackqueue));
+        enqueue(&portTopcular.gettingBackqueue2, dequeue(&portTopcular.gettingBackqueue));
     }
 
-    // join vehicle threads
-    for (int i = 0; i < VEHICLE_AMOUNT_FOR_EACH_TYPE * 4 + 2; i++)
+    size_Eskihisar = portEskihisar.gettingBackqueue2.size;
+    sizeTopcular = portTopcular.gettingBackqueue2.size;
+    pthread_t threadsHH[sizeTopcular + size_Eskihisar];
+    // create vehicle threads for getting back queue2
+    for (int i = 0; i < size_Eskihisar; i++)
     {
-        pthread_join(threads[i], NULL);
+        printf("bb%d", i);
+        pthread_create(&threadsHH[i], NULL, vehicle_thread, dequeue(&portEskihisar.gettingBackqueue2));
     }
 
+    for (int i = 0; i < sizeTopcular; i++)
+    {
+        printf("kk%d", i);
+        pthread_create(&threadsHH[i + size_Eskihisar], NULL, vehicle_thread, dequeue(&portTopcular.gettingBackqueue2));
+    }
+    sleep(1);
+
+    printf("YYYYYYYYYYYYYY");
+    /*
+        for (int i = 0; i < size_Eskihisar + sizeTopcular; i++)
+        {
+
+            pthread_join(threadsHH[i], NULL);
+        }*/
     return 0;
 }
