@@ -343,8 +343,9 @@ void *ferry_thread(void *arg)
         }
         if (vehicle->size >= ferry->capacity)
         {
-
-            printf("Ferry %d is moving to port %d\n", ferry->id, port->id);
+            vehicle->destination_port = vehicle->start_port;
+            vehicle->start_port = vehicle->destination_port == 0 ? 1 : 0;
+            vehicle->status = "arrived";
             ferry->capacity = 30;
             stop1 = 1;
             stop2 = 1;
@@ -368,8 +369,6 @@ void *ferry_thread(void *arg)
         }
     }
     printf("gettingback queue size is %d\n", get_queue_size(&port->gettingBackqueue[0]));
-    printf("gettingback queue size is %d\n", get_queue_size(&port->gettingBackqueue[1]));
-    printf("gettingback queue size is %d\n", get_queue_size(&port->gettingBackqueue[2]));
 
     return NULL;
 }
