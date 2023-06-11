@@ -173,6 +173,14 @@ Vehicle *peek(Queue *q)
 void *vehicle_thread(void *arg)
 {
     Vehicle *vehicle = (Vehicle *)arg;
+    if (vehicle->start_port == 0)
+    {
+        vehicle = dequeue(&portEskihisar.gettingBackqueue);
+    }
+    else
+    {
+        vehicle = dequeue(&portTopcular.gettingBackqueue);
+    }
 
     char *vehicleType;
 
